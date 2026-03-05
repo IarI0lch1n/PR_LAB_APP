@@ -42,3 +42,20 @@ def download_file(filename: str):
         filename=filename,          
         media_type="application/octet-stream"
     )
+
+@app.delete("/files/{filename}")
+def delete_file(filename: str):
+    # 1) пробуем удалить как есть
+    file_path = STORAGE / filename
+    if file_path.exists():
+        file_path.unlink()
+        return {"message": "file deleted", "filename": file_path.name}
+
+    # 2) если не нашли — ищем без учёта регистра
+    lowered = filename.lower()
+    for f in STORAGE.iterdir():
+        if f.is_file() and f.name.lower() == lowered:
+            f.unlink()
+            return {"message": "file deleted", "filename": f.name}
+
+    raise HTTPException(status_code=404, detail="Not Found")

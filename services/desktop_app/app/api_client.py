@@ -131,3 +131,15 @@ class ApiClient:
         out = Path(save_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(r.content)
+
+    def delete_file(self, filename: str) -> Dict[str, Any]:
+        r = self._client.delete(f"{self.file_api_url}/files/{filename}")
+
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("detail", r.text)
+            except Exception:
+                detail = r.text or "Error"
+            raise RuntimeError(f"{r.status_code}: {detail}")
+
+        return r.json()

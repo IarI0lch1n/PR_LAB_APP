@@ -24,8 +24,11 @@ class FilesPage(QWidget):
         controls = QHBoxLayout()
         self.refresh_btn = QPushButton("Refresh")
         self.upload_btn = QPushButton("Upload...")
+        self.delete_btn = QPushButton("Delete")
         controls.addWidget(self.refresh_btn)
         controls.addWidget(self.upload_btn)
+        controls.addWidget(self.delete_btn)
+
         controls.addStretch(1)
         root.addLayout(controls)
 
@@ -46,11 +49,14 @@ class FilesPage(QWidget):
         dl.addWidget(self.download_btn)
         root.addWidget(dl_box)
 
+        root.addLayout(controls)
+
         # Events
         self.refresh_btn.clicked.connect(self.load_files)
         self.upload_btn.clicked.connect(self.on_upload)
         self.choose_btn.clicked.connect(self.on_choose_path)
         self.download_btn.clicked.connect(self.on_download)
+        self.delete_btn.clicked.connect(self.on_delete)
 
         self.load_files()
 
@@ -122,3 +128,18 @@ class FilesPage(QWidget):
         if name in ("(no files)", ""):
             return None
         return name
+
+    def on_delete(self) -> None:
+        filename = self.current_filename()
+        if not filename:
+            show_info(self, "Delete", "Select a file first.")
+            return
+
+        try:
+            self.api.delete_file(filename)
+        except Exception as e:
+            show_error(self, "Delete failed", str(e))
+            return
+
+        show_info(self, "Delete", f"Deleted:\n{filename}")
+        self.load_files()

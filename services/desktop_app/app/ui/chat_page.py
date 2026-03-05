@@ -41,8 +41,10 @@ class ChatPage(QWidget):
         btns = QHBoxLayout()
         self.send_btn = QPushButton("Send")
         self.refresh_btn = QPushButton("Refresh")
+        self.delete_btn = QPushButton("Delete selected")
         btns.addWidget(self.send_btn)
         btns.addWidget(self.refresh_btn)
+        btns.addWidget(self.delete_btn)
         btns.addStretch(1)
         form.addLayout(btns)
 
@@ -56,6 +58,7 @@ class ChatPage(QWidget):
         # Hook events
         self.send_btn.clicked.connect(self.on_send)
         self.refresh_btn.clicked.connect(self.load_messages)
+        self.delete_btn.clicked.connect(self.on_delete)
 
         # initial load
         self.load_messages()
@@ -81,7 +84,9 @@ class ChatPage(QWidget):
             label = f"#{mid}: {text}"
             if file_:
                 label += f"  [file: {file_}]"
-            self.list.addItem(label)
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, mid)   # сохраняем id
+            self.list.addItem(item)
 
     def on_send(self) -> None:
         text = self.text_input.text().strip()
@@ -99,4 +104,23 @@ class ChatPage(QWidget):
 
         self.text_input.clear()
         self.file_input.clear()
+        self.load_messages()
+
+    def on_delete(self) -> None:
+        item = self.list.currentItem()
+        if not item:
+            show_info(self, "Delete", "Select a message first.")
+            return
+
+        mid = item.data(Qt.UserRole)
+        if mid in (None, "?", ""):
+            show_info(self, "Delete", "This item cannot be deleted.")
+            return
+
+        try:
+            self.api.delete_message(int(mid))
+        except Exception as e:
+            show_error(self, "Delete failed", str(e))
+            return
+
         self.load_messages()
