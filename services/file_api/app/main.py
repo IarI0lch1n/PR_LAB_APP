@@ -45,17 +45,10 @@ def download_file(filename: str):
 
 @app.delete("/files/{filename}")
 def delete_file(filename: str):
-    # 1) пробуем удалить как есть
     file_path = STORAGE / filename
-    if file_path.exists():
-        file_path.unlink()
-        return {"message": "file deleted", "filename": file_path.name}
 
-    # 2) если не нашли — ищем без учёта регистра
-    lowered = filename.lower()
-    for f in STORAGE.iterdir():
-        if f.is_file() and f.name.lower() == lowered:
-            f.unlink()
-            return {"message": "file deleted", "filename": f.name}
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Not Found")
 
-    raise HTTPException(status_code=404, detail="Not Found")
+    file_path.unlink()
+    return {"message": "file deleted", "filename": filename}
