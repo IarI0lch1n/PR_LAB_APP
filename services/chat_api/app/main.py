@@ -1,12 +1,13 @@
 from fastapi import FastAPI, HTTPException
+from sqlalchemy import text as sql
 import httpx
+import os
 
-app = FastAPI(title="Chat Service", version="1.1")
+from .db import engine
 
-FILE_API_URL = "http://file_api:8002"
+app = FastAPI(title="Chat API", version="3.1")
 
-messages: list[dict] = []
-message_id_counter = 1
+FILE_API_URL = os.getenv("FILE_API_URL", "http://file_api:8002")
 
 
 @app.get("/health")
@@ -14,16 +15,11 @@ def health():
     return {"status": "ok", "service": "chat_api"}
 
 
-@app.get("/messages")
-def get_messages():
-    return {"messages": messages}
-
-
-def _ensure_file_exists(filename: str) -> None:
+def ensure_file_exists(filename: str) -> None:
     try:
-        resp = httpx.get(f"{FILE_API_URL}/files", timeout=5.0)
-        resp.raise_for_status()
-        files = resp.json().get("files", [])
+        r = httpx.get(f"{FILE_API_URL}/files", timeout=5.0)
+        r.raise_for_status()
+        files = r.json().get("files", [])
     except Exception:
         raise HTTPException(status_code=500, detail="File service unavailable")
 
@@ -31,46 +27,90 @@ def _ensure_file_exists(filename: str) -> None:
         raise HTTPException(status_code=404, detail="Attached file not found in file service")
 
 
+def _row_to_message_dict(row) -> dict:
+    d = dict(row)
+    d["file"] = d.pop("attached_file", None)
+    return d
+
+
+@app.get("/messages")
+def get_messages():
+    with engine.connect() as conn:
+        rows = conn.execute(sql("""
+            SELECT id, text, file_name AS attached_file, created_at
+            FROM dbo.messages
+            ORDER BY id ASC
+        """)).mappings().all()
+
+    return {"messages": [_row_to_message_dict(r) for r in rows]}
+
+
 @app.post("/messages")
 def send_message(text: str, filename: str | None = None):
-    global message_id_counter
-
     if filename:
-        _ensure_file_exists(filename)
+        ensure_file_exists(filename)
 
-    message = {"id": message_id_counter, "text": text, "file": filename}
-    messages.append(message)
-    message_id_counter += 1
-    return message
+    with engine.begin() as conn:
+        res = conn.execute(sql("""
+            INSERT INTO dbo.messages (text, file_name)
+            OUTPUT INSERTED.id,
+                   INSERTED.text,
+                   INSERTED.file_name AS attached_file,
+                   INSERTED.created_at
+            VALUES (:text, :file)
+        """), {"text": text, "file": filename})
+
+        row = res.mappings().first()
+
+    return _row_to_message_dict(row)
 
 
 @app.put("/messages/{message_id}")
 def update_message(message_id: int, text: str | None = None, filename: str | None = None):
-    # найти сообщение
-    for m in messages:
-        if m["id"] == message_id:
-            # обновить поля (если передали)
-            if text is not None:
-                m["text"] = text
+    if filename:
+        ensure_file_exists(filename)
 
-            if filename is not None:
-                if filename != "":
-                    _ensure_file_exists(filename)
-                    m["file"] = filename
-                else:
-                    # если filename пустая строка — “удалить привязку файла”
-                    m["file"] = None
+    with engine.begin() as conn:
+        exists = conn.execute(
+            sql("SELECT 1 FROM dbo.messages WHERE id=:id"),
+            {"id": message_id}
+        ).first()
+        if not exists:
+            raise HTTPException(status_code=404, detail="Message not found")
 
-            return m
+        if text is not None:
+            conn.execute(
+                sql("UPDATE dbo.messages SET text=:t WHERE id=:id"),
+                {"t": text, "id": message_id}
+            )
 
-    raise HTTPException(status_code=404, detail="Message not found")
+        if filename is not None:
+            conn.execute(
+                sql("UPDATE dbo.messages SET file_name=:f WHERE id=:id"),
+                {"f": filename, "id": message_id}
+            )
+
+        row = conn.execute(sql("""
+            SELECT id, text, file_name AS attached_file, created_at
+            FROM dbo.messages
+            WHERE id=:id
+        """), {"id": message_id}).mappings().first()
+
+    return _row_to_message_dict(row)
 
 
 @app.delete("/messages/{message_id}")
 def delete_message(message_id: int):
-    for i, m in enumerate(messages):
-        if m["id"] == message_id:
-            deleted = messages.pop(i)
-            return {"deleted": deleted}
+    with engine.begin() as conn:
+        row = conn.execute(sql("""
+            SELECT id, text, file_name AS attached_file, created_at
+            FROM dbo.messages
+            WHERE id=:id
+        """), {"id": message_id}).mappings().first()
 
-    raise HTTPException(status_code=404, detail="Message not found")
+        if not row:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        conn.execute(sql("DELETE FROM dbo.messages WHERE id=:id"), {"id": message_id})
+
+    return {"deleted": _row_to_message_dict(row)}

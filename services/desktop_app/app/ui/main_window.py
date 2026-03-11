@@ -21,14 +21,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PR Desktop App (Chat + Publics + Files)")
         self.resize(1000, 650)
 
-        # Tabs
         self.tabs = QTabWidget()
         self.tabs.addTab(ChatPage(api), "Chat")
         self.tabs.addTab(PublicsPage(), "Publics")
         self.tabs.addTab(FilesPage(api), "Files")
         self.setCentralWidget(self.tabs)
 
-        # Toolbar with theme toggle button (icon)
         self.toolbar = QToolBar("Main")
         self.toolbar.setMovable(False)
         self.addToolBar(Qt.TopToolBarArea, self.toolbar)
@@ -41,15 +39,12 @@ class MainWindow(QMainWindow):
         self.theme.toggle()
         self.theme.apply(self.qt_app)
 
-        # update icon according to current theme
         self.theme_action.setIcon(self.theme.current.make_toggle_icon())
 
-        # force repaint / restyle so tab text updates
         self.style().unpolish(self)
         self.style().polish(self)
         self.update()
 
-        # also refresh tabs explicitly
         self.tabs.update()
 
     def closeEvent(self, event):

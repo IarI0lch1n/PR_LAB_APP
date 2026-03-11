@@ -17,11 +17,10 @@ def main() -> int:
 
     app = QApplication(sys.argv)
 
-    # Theme (Abstract Factory)
     theme_manager = ThemeManager(
         light=LightThemeFactory(),
         dark=DarkThemeFactory(),
-        current=LightThemeFactory()  # default
+        current=LightThemeFactory()  
     )
     theme_manager.apply(app)
 

@@ -22,7 +22,6 @@ class PublicsPage(QWidget):
             "Пока что для примера тут будут вставки того, что якобы будет здесь."
         )
         info.setWordWrap(True)
-        # IMPORTANT: no fixed color here, theme should control it
         root.addWidget(info)
 
         self.list = QListWidget()

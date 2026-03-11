@@ -9,7 +9,6 @@ from PySide6.QtGui import (
 from PySide6.QtCore import Qt
 
 
-# ---------- Abstract Factory ----------
 class ThemeFactory(ABC):
     @abstractmethod
     def name(self) -> str: ...
@@ -28,7 +27,6 @@ class ThemeFactory(ABC):
         ...
 
 
-# ---------- Concrete Factories ----------
 class LightThemeFactory(ThemeFactory):
     def name(self) -> str:
         return "light"
@@ -47,11 +45,9 @@ class LightThemeFactory(ThemeFactory):
         return p
 
     def make_toggle_icon(self) -> QIcon:
-        # When light theme is active, show "moon" (switch to dark)
         return _make_moon_icon()
 
     def make_stylesheet(self) -> str:
-        # keep it minimal; palette does most work in light theme
         return """
         QTabBar::tab {
             padding: 6px 10px;
@@ -77,11 +73,9 @@ class DarkThemeFactory(ThemeFactory):
         return p
 
     def make_toggle_icon(self) -> QIcon:
-        # When dark theme is active, show "sun" (switch to light)
         return _make_sun_icon()
 
     def make_stylesheet(self) -> str:
-        # Key fix: QTabBar text color + general widget colors
         return """
         QMainWindow, QWidget {
             background-color: #121212;
@@ -157,7 +151,6 @@ class DarkThemeFactory(ThemeFactory):
         """
 
 
-# ---------- Theme Manager ----------
 @dataclass
 class ThemeManager:
     light: ThemeFactory
@@ -173,7 +166,6 @@ class ThemeManager:
         app.setStyleSheet(self.current.make_stylesheet())
 
 
-# ---------- Icons (drawn in code, no assets needed) ----------
 def _make_sun_icon(size: int = 24) -> QIcon:
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
