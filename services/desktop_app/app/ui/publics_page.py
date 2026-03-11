@@ -2,10 +2,11 @@ from __future__ import annotations
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem
 from PySide6.QtCore import Qt
 
+
 class PublicsPage(QWidget):
     """
     Placeholder for "Telegram-like publics/channels".
-    We'll implement it in later labs (DB + roles + subscriptions).
+    Text color must follow app theme (no hardcoded gray).
     """
     def __init__(self):
         super().__init__()
@@ -20,13 +21,13 @@ class PublicsPage(QWidget):
             "В следующих лабах тут будут: создание паблика, подписки, список постов, модерация.\n"
             "Пока что для примера тут будут вставки того, что якобы будет здесь."
         )
-        info.setStyleSheet("color: #555;")
+        info.setWordWrap(True)
+        # IMPORTANT: no fixed color here, theme should control it
         root.addWidget(info)
 
         self.list = QListWidget()
         root.addWidget(self.list, 1)
 
-        # demo items
         for name in ["Announcements", "GameDev", "University"]:
             it = QListWidgetItem(f"#{name} (stub)")
             it.setFlags(Qt.ItemIsEnabled)
