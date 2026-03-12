@@ -1,8 +1,11 @@
 from __future__ import annotations
-import os
+
+from pathlib import Path
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QPushButton,
-    QFileDialog, QLineEdit, QGroupBox
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QListWidget, QListWidgetItem, QLineEdit, QFileDialog, QGroupBox
 )
 
 from app.api_client import ApiClient
@@ -20,126 +23,128 @@ class FilesPage(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         root.addWidget(title)
 
-        # Controls
         controls = QHBoxLayout()
         self.refresh_btn = QPushButton("Refresh")
         self.upload_btn = QPushButton("Upload...")
         self.delete_btn = QPushButton("Delete")
+
         controls.addWidget(self.refresh_btn)
         controls.addWidget(self.upload_btn)
         controls.addWidget(self.delete_btn)
-
         controls.addStretch(1)
         root.addLayout(controls)
 
-        # List
         root.addWidget(QLabel("Files in cloud:"))
+
         self.list = QListWidget()
         root.addWidget(self.list, 1)
 
-        # Download section
         dl_box = QGroupBox("Download selected")
         dl = QHBoxLayout(dl_box)
-        self.save_as = QLineEdit()
-        self.save_as.setPlaceholderText("Choose where to save...")
+
+        self.save_path = QLineEdit()
+        self.save_path.setPlaceholderText("Choose where to save...")
         self.choose_btn = QPushButton("Save as...")
         self.download_btn = QPushButton("Download")
-        dl.addWidget(self.save_as, 1)
+
+        dl.addWidget(self.save_path, 1)
         dl.addWidget(self.choose_btn)
         dl.addWidget(self.download_btn)
+
         root.addWidget(dl_box)
 
-        root.addLayout(controls)
-
-        # Events
         self.refresh_btn.clicked.connect(self.load_files)
         self.upload_btn.clicked.connect(self.on_upload)
-        self.choose_btn.clicked.connect(self.on_choose_path)
-        self.download_btn.clicked.connect(self.on_download)
         self.delete_btn.clicked.connect(self.on_delete)
+        self.choose_btn.clicked.connect(self.on_choose_save)
+        self.download_btn.clicked.connect(self.on_download)
 
         self.load_files()
 
     def load_files(self) -> None:
         self.list.clear()
         try:
-            files = self.api.list_files()
+            files = self.api.list_files() 
         except Exception as e:
             show_error(self, "File API error", str(e))
             return
 
         if not files:
-            self.list.addItem("(no files)")
+            it = QListWidgetItem("(no files)")
+            it.setFlags(Qt.NoItemFlags)
+            self.list.addItem(it)
             return
 
         for f in files:
-            self.list.addItem(f)
+            fid = f.get("id")
+            name = f.get("filename")
+            if fid is None or not name:
+                continue
+            item = QListWidgetItem(name)
+            item.setData(Qt.UserRole, int(fid))  
+            self.list.addItem(item)
+
+    def current_file(self):
+        item = self.list.currentItem()
+        if not item:
+            return None, None
+        fid = item.data(Qt.UserRole)
+        name = item.text()
+        if fid in (None, "") or name.startswith("("):
+            return None, None
+        return int(fid), name
 
     def on_upload(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select file to upload")
         if not path:
             return
-
         try:
             self.api.upload_file(path)
         except Exception as e:
             show_error(self, "Upload failed", str(e))
             return
-
-        show_info(self, "Upload", "Uploaded successfully.")
         self.load_files()
 
-    def on_choose_path(self) -> None:
-        filename = self.current_filename()
-        if not filename:
+    def on_delete(self) -> None:
+        fid, name = self.current_file()
+        if fid is None:
+            show_info(self, "Delete", "Select a file first.")
+            return
+        try:
+            self.api.delete_file(fid)
+        except Exception as e:
+            show_error(self, "Delete failed", str(e))
+            return
+        show_info(self, "Delete", f"Deleted:\n{name}")
+        self.load_files()
+
+    def on_choose_save(self) -> None:
+        fid, name = self.current_file()
+        if fid is None:
             show_info(self, "Download", "Select a file first.")
             return
 
-        save_path, _ = QFileDialog.getSaveFileName(self, "Save file as", filename)
-        if save_path:
-            self.save_as.setText(save_path)
+        default_name = name
+        out_path, _ = QFileDialog.getSaveFileName(self, "Save file as", default_name)
+        if out_path:
+            self.save_path.setText(out_path)
 
     def on_download(self) -> None:
-        filename = self.current_filename()
-        if not filename:
+        fid, name = self.current_file()
+        if fid is None:
             show_info(self, "Download", "Select a file first.")
             return
 
-        save_path = self.save_as.text().strip()
-        if not save_path:
-            # default to downloads
-            downloads = os.path.join(os.path.expanduser("~"), "Downloads")
-            save_path = os.path.join(downloads, filename)
-            self.save_as.setText(save_path)
+        out_path = self.save_path.text().strip()
+        if not out_path:
+            downloads = Path.home() / "Downloads"
+            out_path = str(downloads / name)
+            self.save_path.setText(out_path)
 
         try:
-            self.api.download_file(filename, save_path)
+            self.api.download_file(fid, out_path)
         except Exception as e:
             show_error(self, "Download failed", str(e))
             return
 
-        show_info(self, "Download", f"Saved to:\n{save_path}")
-
-    def current_filename(self) -> str | None:
-        item = self.list.currentItem()
-        if not item:
-            return None
-        name = item.text().strip()
-        if name in ("(no files)", ""):
-            return None
-        return name
-
-    def on_delete(self) -> None:
-        filename = self.current_filename()
-        if not filename:
-            show_info(self, "Delete", "Select a file first.")
-            return
-
-        try:
-            self.api.delete_file(filename)
-        except Exception as e:
-            show_error(self, "Delete failed", str(e))
-            return
-
-        show_info(self, "Delete", f"Deleted:\n{filename}")
-        self.load_files()
+        show_info(self, "Download", f"Saved:\n{out_path}")

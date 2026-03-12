@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QListWidget, QListWidgetItem, QGroupBox
+    QListWidget, QListWidgetItem, QGroupBox, QComboBox
 )
 
 from app.api_client import ApiClient
@@ -20,7 +21,6 @@ class ChatPage(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         root.addWidget(title)
 
-        # Form
         form_box = QGroupBox("Send message")
         form = QVBoxLayout(form_box)
 
@@ -32,10 +32,15 @@ class ChatPage(QWidget):
         form.addLayout(row1)
 
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Attach filename (optional):"))
-        self.file_input = QLineEdit()
-        self.file_input.setPlaceholderText("example.pdf")
-        row2.addWidget(self.file_input)
+        row2.addWidget(QLabel("Attach file (optional):"))
+
+        self.file_combo = QComboBox()
+        self.file_combo.addItem("None", None)
+        row2.addWidget(self.file_combo)
+
+        self.reload_files_btn = QPushButton("Reload files")
+        row2.addWidget(self.reload_files_btn)
+
         form.addLayout(row2)
 
         btns = QHBoxLayout()
@@ -50,18 +55,40 @@ class ChatPage(QWidget):
 
         root.addWidget(form_box)
 
-        # Messages list
         self.list = QListWidget()
         root.addWidget(QLabel("Messages:"))
         root.addWidget(self.list, 1)
 
-        # Hook events
         self.send_btn.clicked.connect(self.on_send)
         self.refresh_btn.clicked.connect(self.load_messages)
         self.delete_btn.clicked.connect(self.on_delete)
+        self.reload_files_btn.clicked.connect(self.load_files_into_combo)
 
-        # initial load
+        self.load_files_into_combo()
         self.load_messages()
+
+    def load_files_into_combo(self) -> None:
+        current = self.file_combo.currentData()
+
+        self.file_combo.clear()
+        self.file_combo.addItem("None", None)
+
+        try:
+            files = self.api.list_files()  
+        except Exception:
+            files = []
+
+        for f in files:
+            fid = f.get("id")
+            name = f.get("filename")
+            if fid is None or not name:
+                continue
+            self.file_combo.addItem(name, int(fid))
+
+        if current is not None:
+            idx = self.file_combo.findData(current)
+            if idx >= 0:
+                self.file_combo.setCurrentIndex(idx)
 
     def load_messages(self) -> None:
         self.list.clear()
@@ -80,30 +107,34 @@ class ChatPage(QWidget):
         for m in msgs:
             mid = m.get("id", "?")
             text = m.get("text", "")
-            file_ = m.get("file", None)
+            filename = m.get("file", None)  
+            file_id = m.get("file_id", None)
+
             label = f"#{mid}: {text}"
-            if file_:
-                label += f"  [file: {file_}]"
+            if filename:
+                label += f"  [file: {filename}]"
+                if file_id is not None:
+                    label += f" (id={file_id})"
+
             item = QListWidgetItem(label)
-            item.setData(Qt.UserRole, mid)   # сохраняем id
+            item.setData(Qt.UserRole, mid)
             self.list.addItem(item)
 
     def on_send(self) -> None:
         text = self.text_input.text().strip()
-        filename = self.file_input.text().strip()
-
         if not text:
             show_info(self, "Validation", "Text is required.")
             return
 
+        file_id = self.file_combo.currentData()  
+
         try:
-            self.api.send_message(text=text, filename=(filename or None))
+            self.api.send_message(text=text, file_id=file_id)
         except Exception as e:
             show_error(self, "Send failed", str(e))
             return
 
         self.text_input.clear()
-        self.file_input.clear()
         self.load_messages()
 
     def on_delete(self) -> None:
