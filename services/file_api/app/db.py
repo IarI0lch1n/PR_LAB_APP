@@ -10,8 +10,8 @@ def make_engine():
     host = os.getenv("DB_HOST", "host.docker.internal")
     port = os.getenv("DB_PORT", "1433")
     name = os.getenv("DB_NAME", "PR_LAB_APP")
-    user = os.getenv("DB_USER", "White_Delta")
-    pwd  = os.getenv("DB_PASS", "")
+    user = os.getenv("DB_USER", "pr_user")
+    pwd  = os.getenv("DB_PASS", "PrLab!12345")
     driver = os.getenv("DB_DRIVER", "ODBC Driver 18 for SQL Server")
 
     odbc = (
