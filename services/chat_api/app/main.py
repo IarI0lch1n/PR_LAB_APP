@@ -7,9 +7,9 @@ from sqlalchemy import text as sql
 
 from .db import engine
 
-app = FastAPI(title="Chat API", version="5.0")
+app = FastAPI(title="Chat API", version="6.0")
 
-ACCOUNT_API_URL = os.getenv("ACCOUNT_API_URL", "http://account_api:8003")
+ACCOUNT_API_URL = os.getenv("ACCOUNT_API_URL", "http://account_api:8003").rstrip("/")
 
 
 @app.get("/health")
@@ -25,15 +25,15 @@ def get_current_user(x_employee_key: str | None) -> dict:
         r = httpx.get(
             f"{ACCOUNT_API_URL}/me",
             headers={"X-Employee-Key": x_employee_key},
-            timeout=5.0
+            timeout=5.0,
         )
-        if r.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid employee key")
-        return r.json()
-    except HTTPException:
-        raise
     except Exception:
         raise HTTPException(status_code=500, detail="Account service unavailable")
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid employee key")
+
+    return r.json()
 
 
 @app.get("/chats")
@@ -41,9 +41,6 @@ def list_chats(x_employee_key: str | None = Header(default=None, alias="X-Employ
     me = get_current_user(x_employee_key)
     my_id = int(me["id"])
 
-    # Идея:
-    # 1) делаем "плоский" список (other_id, created_at) через UNION ALL
-    # 2) группируем уже по other_id и берём MAX(created_at)
     with engine.connect() as conn:
         rows = conn.execute(sql("""
             WITH conv AS (
@@ -63,7 +60,12 @@ def list_chats(x_employee_key: str | None = Header(default=None, alias="X-Employ
               WHERE other_id IS NOT NULL
               GROUP BY other_id
             )
-            SELECT p.other_id, e.full_name, e.email, e.phone, p.last_time
+            SELECT
+              p.other_id,
+              e.full_name,
+              e.email,
+              e.phone,
+              p.last_time
             FROM pairs p
             JOIN dbo.employees e ON e.id = p.other_id
             ORDER BY p.last_time DESC;
@@ -75,7 +77,7 @@ def list_chats(x_employee_key: str | None = Header(default=None, alias="X-Employ
 @app.get("/chats/{other_id}/messages")
 def chat_messages(
     other_id: int,
-    x_employee_key: str | None = Header(default=None, alias="X-Employee-Key")
+    x_employee_key: str | None = Header(default=None, alias="X-Employee-Key"),
 ):
     me = get_current_user(x_employee_key)
     my_id = int(me["id"])
@@ -90,10 +92,14 @@ def chat_messages(
               m.sender_employee_id,
               m.recipient_employee_id,
               es.full_name AS sender_name,
-              er.full_name AS recipient_name
+              er.full_name AS recipient_name,
+              f.filename,
+              fo.full_name AS file_owner_name
             FROM dbo.messages m
             LEFT JOIN dbo.employees es ON es.id = m.sender_employee_id
             LEFT JOIN dbo.employees er ON er.id = m.recipient_employee_id
+            LEFT JOIN dbo.files f ON f.id = m.file_id
+            LEFT JOIN dbo.employees fo ON fo.id = f.owner_employee_id
             WHERE (
               (m.sender_employee_id = :me AND m.recipient_employee_id = :other)
               OR
@@ -110,14 +116,36 @@ def send_message(
     other_id: int,
     text: str,
     file_id: int | None = None,
-    x_employee_key: str | None = Header(default=None, alias="X-Employee-Key")
+    x_employee_key: str | None = Header(default=None, alias="X-Employee-Key"),
 ):
     me = get_current_user(x_employee_key)
     my_id = int(me["id"])
 
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
     with engine.begin() as conn:
-        # вставка сообщения
-        res = conn.execute(sql("""
+        # проверим получателя
+        recipient_exists = conn.execute(sql("""
+            SELECT TOP 1 1
+            FROM dbo.employees
+            WHERE id = :id AND is_active = 1
+        """), {"id": int(other_id)}).scalar()
+
+        if not recipient_exists:
+            raise HTTPException(status_code=404, detail="Recipient not found")
+
+        if file_id is not None:
+            file_row = conn.execute(sql("""
+                SELECT TOP 1 id
+                FROM dbo.files
+                WHERE id = :fid
+            """), {"fid": int(file_id)}).scalar()
+            if not file_row:
+                raise HTTPException(status_code=404, detail="Attached file not found")
+
+        mid = conn.execute(sql("""
             INSERT INTO dbo.messages (text, file_id, sender_employee_id, recipient_employee_id)
             OUTPUT INSERTED.id
             VALUES (:text, :file_id, :sender, :recipient)
@@ -125,20 +153,27 @@ def send_message(
             "text": text,
             "file_id": file_id,
             "sender": my_id,
-            "recipient": int(other_id)
-        })
-        mid = int(res.scalar())
+            "recipient": int(other_id),
+        }).scalar()
 
         row = conn.execute(sql("""
             SELECT
-              m.id, m.text, m.file_id, m.created_at,
-              m.sender_employee_id, m.recipient_employee_id,
+              m.id,
+              m.text,
+              m.file_id,
+              m.created_at,
+              m.sender_employee_id,
+              m.recipient_employee_id,
               es.full_name AS sender_name,
-              er.full_name AS recipient_name
+              er.full_name AS recipient_name,
+              f.filename,
+              fo.full_name AS file_owner_name
             FROM dbo.messages m
             LEFT JOIN dbo.employees es ON es.id = m.sender_employee_id
             LEFT JOIN dbo.employees er ON er.id = m.recipient_employee_id
+            LEFT JOIN dbo.files f ON f.id = m.file_id
+            LEFT JOIN dbo.employees fo ON fo.id = f.owner_employee_id
             WHERE m.id = :id
-        """), {"id": mid}).mappings().first()
+        """), {"id": int(mid)}).mappings().first()
 
     return dict(row)

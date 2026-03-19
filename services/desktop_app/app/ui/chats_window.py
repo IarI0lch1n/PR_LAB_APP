@@ -12,10 +12,6 @@ from app.ui.widgets import show_error, show_info
 
 
 class ChatsWindow(QWidget):
-    """
-    Chats list + employee search (with dropdown suggestions).
-    Double click on a chat -> opens separate ChatWindow.
-    """
     def __init__(self, api: ApiClient):
         super().__init__()
         self.api = api
@@ -25,7 +21,6 @@ class ChatsWindow(QWidget):
 
         root = QVBoxLayout(self)
 
-        # --- Search row ---
         sr = QHBoxLayout()
         sr.addWidget(QLabel("New chat:"))
 
@@ -35,10 +30,8 @@ class ChatsWindow(QWidget):
 
         self.open_btn = QPushButton("Open")
         sr.addWidget(self.open_btn)
-
         root.addLayout(sr)
 
-        # completer
         self._suggestions: list[dict] = []
         self._model = QStringListModel()
         self._completer = QCompleter(self._model)
@@ -46,7 +39,6 @@ class ChatsWindow(QWidget):
         self._completer.setFilterMode(Qt.MatchContains)
         self.search.setCompleter(self._completer)
 
-        # --- Chats list ---
         root.addWidget(QLabel("Your chats:"))
         self.list = QListWidget()
         root.addWidget(self.list, 1)
@@ -57,7 +49,6 @@ class ChatsWindow(QWidget):
         bottom.addStretch(1)
         root.addLayout(bottom)
 
-        # events
         self.refresh_btn.clicked.connect(self.load_chats)
         self.search.textChanged.connect(self.on_search_changed)
         self.open_btn.clicked.connect(self.open_chat_from_search)
@@ -69,7 +60,7 @@ class ChatsWindow(QWidget):
         self.list.clear()
 
         try:
-            chats = self.api.list_chats()  # <-- ВАЖНО: теперь chats определён
+            chats = self.api.list_chats()
         except Exception as e:
             show_error(self, "Chats", str(e))
             return
@@ -97,8 +88,6 @@ class ChatsWindow(QWidget):
     def on_search_changed(self, text: str) -> None:
         text = text.strip()
 
-        # ✅ если пользователь выбрал подсказку (формат "name | email | phone"),
-        # не перезапрашиваем поиск и не перетираем self._suggestions
         if "|" in text:
             return
 
@@ -116,10 +105,12 @@ class ChatsWindow(QWidget):
             return
 
         self._suggestions = items
+
         view = []
         for it in items[:10]:
             s = f'{it.get("full_name") or "-"} | {it.get("email") or "-"} | {it.get("phone") or "-"}'
             view.append(s)
+
         self._model.setStringList(view)
 
     def open_chat_from_search(self) -> None:
@@ -150,5 +141,5 @@ class ChatsWindow(QWidget):
         self.open_chat(int(other_id), item.text())
 
     def open_chat(self, other_id: int, title: str) -> None:
-        w = ChatWindow(self.api, other_id, title)
-        w.show()
+        self._child = ChatWindow(self.api, other_id, title)
+        self._child.show()

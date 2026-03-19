@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 import httpx
 
 
@@ -15,9 +17,8 @@ class ApiClient:
         self.chat_api_url = chat_api_url.rstrip("/")
         self.file_api_url = file_api_url.rstrip("/")
         self.account_api_url = account_api_url.rstrip("/")
-
         self._client = httpx.Client(timeout=timeout)
-        self.employee_key: Optional[str] = None  # set after login
+        self.employee_key: Optional[str] = None
 
     def close(self) -> None:
         self._client.close()
@@ -30,7 +31,7 @@ class ApiClient:
             return {}
         return {"X-Employee-Key": self.employee_key}
 
-    # -------------------- ACCOUNT --------------------
+    # ---------------- account ----------------
     def me(self) -> Dict[str, Any]:
         r = self._client.get(f"{self.account_api_url}/me", headers=self._auth_headers())
         if r.status_code >= 400:
@@ -38,9 +39,6 @@ class ApiClient:
         return r.json()
 
     def search_employees(self, q: str) -> List[Dict[str, Any]]:
-        print("[DEBUG] search_employees q=", q)
-        print("[DEBUG] account_api_url=", self.account_api_url, "key_set=", bool(self.employee_key))
-
         r = self._client.get(
             f"{self.account_api_url}/employees/search",
             params={"q": q},
@@ -50,7 +48,7 @@ class ApiClient:
             raise RuntimeError(_extract_error(r))
         return r.json().get("items", [])
 
-    # -------------------- CHATS --------------------
+    # ---------------- chats ----------------
     def list_chats(self) -> List[Dict[str, Any]]:
         r = self._client.get(f"{self.chat_api_url}/chats", headers=self._auth_headers())
         if r.status_code >= 400:
@@ -80,12 +78,59 @@ class ApiClient:
             raise RuntimeError(_extract_error(r))
         return r.json()
 
-    # -------------------- FILES (если нужно позже) --------------------
-    def list_files(self) -> List[Any]:
+    # ---------------- files ----------------
+    def list_files(self) -> List[Dict[str, Any]]:
         r = self._client.get(f"{self.file_api_url}/files", headers=self._auth_headers())
         if r.status_code >= 400:
             raise RuntimeError(_extract_error(r))
         return r.json().get("files", [])
+
+    def upload_file(self, file_path: str) -> Dict[str, Any]:
+        p = Path(file_path)
+        if not p.exists() or not p.is_file():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        with p.open("rb") as f:
+            files = {"file": (p.name, f, "application/octet-stream")}
+            r = self._client.post(
+                f"{self.file_api_url}/upload",
+                files=files,
+                headers=self._auth_headers(),
+            )
+
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
+
+    def get_file_meta(self, file_id: int) -> Dict[str, Any]:
+        r = self._client.get(
+            f"{self.file_api_url}/files/{int(file_id)}",
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
+
+    def download_file(self, file_id: int, save_path: str) -> None:
+        r = self._client.get(
+            f"{self.file_api_url}/download/{int(file_id)}",
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+
+        out = Path(save_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(r.content)
+
+    def delete_file(self, file_id: int) -> Dict[str, Any]:
+        r = self._client.delete(
+            f"{self.file_api_url}/files/{int(file_id)}",
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
 
 
 def _extract_error(r: httpx.Response) -> str:

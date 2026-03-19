@@ -26,7 +26,6 @@ def main() -> int:
     )
     theme_manager.apply(app)
 
-    # Login first
     dlg = LoginDialog(api)
     if dlg.exec() != QDialog.DialogCode.Accepted:
         return 0

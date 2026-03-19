@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMainWindow, QTabWidget
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QToolBar
 
 from app.api_client import ApiClient
 from app.theme import ThemeManager
@@ -17,17 +18,35 @@ class MainWindow(QMainWindow):
         self.theme_manager = theme_manager
         self.qt_app = qt_app
 
-        self.setWindowTitle("PR Messenger — " + (getattr(api, "current_user_name", "") or ""))
+        self.setWindowTitle("PR Messenger")
         self.resize(1000, 700)
+
+        tb = QToolBar("Main")
+        self.addToolBar(tb)
+
+        self.theme_action = QAction("🌙", self)
+        self.theme_action.setToolTip("Toggle theme")
+        self.theme_action.triggered.connect(self.on_toggle_theme)
+        tb.addAction(self.theme_action)
 
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
-        # ✅ Вместо старого ChatPage — новый чат (диалоги)
         self.tabs.addTab(ChatsWindow(api), "Chat")
-
-        # Остальные вкладки как раньше
         self.tabs.addTab(PublicsPage(), "Publics")
         self.tabs.addTab(FilesPage(api), "Files")
 
-        self.theme_manager.apply(self.qt_app)
+        self._apply_theme()
+
+    def on_toggle_theme(self):
+        if hasattr(self.theme_manager, "toggle"):
+            self.theme_manager.toggle()
+        elif hasattr(self.theme_manager, "is_dark"):
+            self.theme_manager.is_dark = not self.theme_manager.is_dark
+        self._apply_theme()
+
+    def _apply_theme(self):
+        try:
+            self.theme_manager.apply(self.qt_app)
+        except TypeError:
+            self.theme_manager.apply()

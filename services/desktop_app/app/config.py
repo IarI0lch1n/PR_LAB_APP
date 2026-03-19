@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
-load_dotenv()  # loads .env if exists
+load_dotenv()  
 
 @dataclass(frozen=True)
 class AppConfig:
