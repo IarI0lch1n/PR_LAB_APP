@@ -1,15 +1,15 @@
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from sqlalchemy import text as sql
-import httpx
+from __future__ import annotations
+
 import os
-from typing import Set
-import json
+import httpx
+from fastapi import FastAPI, Header, HTTPException
+from sqlalchemy import text as sql
 
 from .db import engine
 
-app = FastAPI(title="Chat API", version="4.0")
+app = FastAPI(title="Chat API", version="5.0")
 
-FILE_API_URL = os.getenv("FILE_API_URL", "http://file_api:8002")
+ACCOUNT_API_URL = os.getenv("ACCOUNT_API_URL", "http://account_api:8003")
 
 
 @app.get("/health")
@@ -17,216 +17,128 @@ def health():
     return {"status": "ok", "service": "chat_api"}
 
 
-def ensure_file_id_exists(file_id: int) -> None:
+def get_current_user(x_employee_key: str | None) -> dict:
+    if not x_employee_key:
+        raise HTTPException(status_code=401, detail="X-Employee-Key required")
+
     try:
-        r = httpx.get(f"{FILE_API_URL}/files/{file_id}", timeout=5.0)
-        if r.status_code == 404:
-            raise HTTPException(status_code=404, detail="Attached file not found")
-        r.raise_for_status()
+        r = httpx.get(
+            f"{ACCOUNT_API_URL}/me",
+            headers={"X-Employee-Key": x_employee_key},
+            timeout=5.0
+        )
+        if r.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid employee key")
+        return r.json()
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(status_code=500, detail="File service unavailable")
+        raise HTTPException(status_code=500, detail="Account service unavailable")
 
 
-def _row_to_message_dict(row) -> dict:
-    d = dict(row)
-    d["file"] = d.pop("filename", None)
-    d["file_id"] = d.get("file_id")
-    return d
+@app.get("/chats")
+def list_chats(x_employee_key: str | None = Header(default=None, alias="X-Employee-Key")):
+    me = get_current_user(x_employee_key)
+    my_id = int(me["id"])
 
-
-@app.get("/messages")
-def get_messages():
+    # Идея:
+    # 1) делаем "плоский" список (other_id, created_at) через UNION ALL
+    # 2) группируем уже по other_id и берём MAX(created_at)
     with engine.connect() as conn:
         rows = conn.execute(sql("""
-            SELECT m.id, m.text, m.file_id, m.created_at,
-                   f.filename
+            WITH conv AS (
+              SELECT recipient_employee_id AS other_id, created_at
+              FROM dbo.messages
+              WHERE sender_employee_id = :me
+
+              UNION ALL
+
+              SELECT sender_employee_id AS other_id, created_at
+              FROM dbo.messages
+              WHERE recipient_employee_id = :me
+            ),
+            pairs AS (
+              SELECT other_id, MAX(created_at) AS last_time
+              FROM conv
+              WHERE other_id IS NOT NULL
+              GROUP BY other_id
+            )
+            SELECT p.other_id, e.full_name, e.email, e.phone, p.last_time
+            FROM pairs p
+            JOIN dbo.employees e ON e.id = p.other_id
+            ORDER BY p.last_time DESC;
+        """), {"me": my_id}).mappings().all()
+
+    return {"chats": [dict(r) for r in rows]}
+
+
+@app.get("/chats/{other_id}/messages")
+def chat_messages(
+    other_id: int,
+    x_employee_key: str | None = Header(default=None, alias="X-Employee-Key")
+):
+    me = get_current_user(x_employee_key)
+    my_id = int(me["id"])
+
+    with engine.connect() as conn:
+        rows = conn.execute(sql("""
+            SELECT
+              m.id,
+              m.text,
+              m.file_id,
+              m.created_at,
+              m.sender_employee_id,
+              m.recipient_employee_id,
+              es.full_name AS sender_name,
+              er.full_name AS recipient_name
             FROM dbo.messages m
-            LEFT JOIN dbo.files f ON f.id = m.file_id
-            ORDER BY m.id ASC
-        """)).mappings().all()
+            LEFT JOIN dbo.employees es ON es.id = m.sender_employee_id
+            LEFT JOIN dbo.employees er ON er.id = m.recipient_employee_id
+            WHERE (
+              (m.sender_employee_id = :me AND m.recipient_employee_id = :other)
+              OR
+              (m.sender_employee_id = :other AND m.recipient_employee_id = :me)
+            )
+            ORDER BY m.created_at ASC, m.id ASC;
+        """), {"me": my_id, "other": int(other_id)}).mappings().all()
 
-    return {"messages": [_row_to_message_dict(r) for r in rows]}
+    return {"messages": [dict(r) for r in rows]}
 
 
-@app.post("/messages")
-def send_message(text: str, file_id: int | None = None):
-    if file_id is not None:
-        ensure_file_id_exists(file_id)
+@app.post("/chats/{other_id}/messages")
+def send_message(
+    other_id: int,
+    text: str,
+    file_id: int | None = None,
+    x_employee_key: str | None = Header(default=None, alias="X-Employee-Key")
+):
+    me = get_current_user(x_employee_key)
+    my_id = int(me["id"])
 
     with engine.begin() as conn:
+        # вставка сообщения
         res = conn.execute(sql("""
-            INSERT INTO dbo.messages (text, file_id)
-            OUTPUT INSERTED.id, INSERTED.text, INSERTED.file_id, INSERTED.created_at
-            VALUES (:text, :file_id)
-        """), {"text": text, "file_id": file_id})
+            INSERT INTO dbo.messages (text, file_id, sender_employee_id, recipient_employee_id)
+            OUTPUT INSERTED.id
+            VALUES (:text, :file_id, :sender, :recipient)
+        """), {
+            "text": text,
+            "file_id": file_id,
+            "sender": my_id,
+            "recipient": int(other_id)
+        })
+        mid = int(res.scalar())
 
-        row = res.mappings().first()
-
-        row2 = conn.execute(sql("""
-            SELECT m.id, m.text, m.file_id, m.created_at, f.filename
-            FROM dbo.messages m
-            LEFT JOIN dbo.files f ON f.id = m.file_id
-            WHERE m.id = :id
-        """), {"id": row["id"]}).mappings().first()
-
-    return _row_to_message_dict(row2)
-
-
-@app.delete("/messages/{message_id}")
-def delete_message(message_id: int):
-    with engine.begin() as conn:
         row = conn.execute(sql("""
-            SELECT m.id, m.text, m.file_id, m.created_at, f.filename
+            SELECT
+              m.id, m.text, m.file_id, m.created_at,
+              m.sender_employee_id, m.recipient_employee_id,
+              es.full_name AS sender_name,
+              er.full_name AS recipient_name
             FROM dbo.messages m
-            LEFT JOIN dbo.files f ON f.id = m.file_id
+            LEFT JOIN dbo.employees es ON es.id = m.sender_employee_id
+            LEFT JOIN dbo.employees er ON er.id = m.recipient_employee_id
             WHERE m.id = :id
-        """), {"id": message_id}).mappings().first()
+        """), {"id": mid}).mappings().first()
 
-        if not row:
-            raise HTTPException(status_code=404, detail="Message not found")
-
-        conn.execute(sql("DELETE FROM dbo.messages WHERE id=:id"), {"id": message_id})
-
-    return {"deleted": _row_to_message_dict(row)}
-
-active_connections: Set[WebSocket] = set()
-
-@app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket):
-    await ws.accept()
-    active_connections.add(ws)
-
-    try:
-        await ws.send_text(json.dumps({"type": "status", "message": "connected"}))
-
-        while True:
-            raw = await ws.receive_text()
-            try:
-                payload = json.loads(raw)
-            except Exception:
-                await ws.send_text(json.dumps({"type": "error", "detail": "Invalid JSON"}))
-                continue
-
-            text_msg = (payload.get("text") or "").strip()
-            file_id = payload.get("file_id", None)
-
-            if not text_msg:
-                await ws.send_text(json.dumps({"type": "error", "detail": "Text is required"}))
-                continue
-
-            if file_id is not None:
-                try:
-                    ensure_file_id_exists(int(file_id))
-                except Exception as e:
-                    await ws.send_text(json.dumps({"type": "error", "detail": str(e)}))
-                    continue
-
-            with engine.begin() as conn:
-                res = conn.execute(sql("""
-                    INSERT INTO dbo.messages (text, file_id)
-                    OUTPUT INSERTED.id, INSERTED.text, INSERTED.file_id, INSERTED.created_at
-                    VALUES (:text, :file_id)
-                """), {"text": text_msg, "file_id": file_id})
-                row = res.mappings().first()
-
-                row2 = conn.execute(sql("""
-                    SELECT m.id, m.text, m.file_id, m.created_at, f.filename
-                    FROM dbo.messages m
-                    LEFT JOIN dbo.files f ON f.id = m.file_id
-                    WHERE m.id = :id
-                """), {"id": row["id"]}).mappings().first()
-
-            msg = _row_to_message_dict(row2)  
-            out = json.dumps({"type": "message", "data": msg}, default=str)
-
-            
-            dead = []
-            for c in list(active_connections):
-                try:
-                    await c.send_text(out)
-                except Exception:
-                    dead.append(c)
-
-            for d in dead:
-                active_connections.discard(d)
-
-    except WebSocketDisconnect:
-        active_connections.discard(ws)
-    except Exception:
-        active_connections.discard(ws)
-
-active_connections: Set[WebSocket] = set()
-
-@app.websocket("/ws")
-async def ws_endpoint(ws: WebSocket):
-    await ws.accept()
-    active_connections.add(ws)
-
-    try:
-        
-        await ws.send_text(json.dumps({"type": "status", "message": "connected"}))
-
-        while True:
-            raw = await ws.receive_text()
-
-            try:
-                payload = json.loads(raw)
-            except Exception:
-                await ws.send_text(json.dumps({"type": "error", "detail": "Invalid JSON"}))
-                continue
-
-            text_msg = (payload.get("text") or "").strip()
-            file_id = payload.get("file_id", None)
-
-            if not text_msg:
-                await ws.send_text(json.dumps({"type": "error", "detail": "Text is required"}))
-                continue
-
-            if file_id is not None:
-                try:
-                    ensure_file_id_exists(int(file_id))
-                except Exception as e:
-                    await ws.send_text(json.dumps({"type": "error", "detail": str(e)}))
-                    continue
-
-            
-            with engine.begin() as conn:
-                res = conn.execute(sql("""
-                    INSERT INTO dbo.messages (text, file_id)
-                    OUTPUT INSERTED.id, INSERTED.text, INSERTED.file_id, INSERTED.created_at
-                    VALUES (:text, :file_id)
-                """), {"text": text_msg, "file_id": file_id})
-
-                row = res.mappings().first()
-
-                row2 = conn.execute(sql("""
-                    SELECT m.id, m.text, m.file_id, m.created_at, f.filename
-                    FROM dbo.messages m
-                    LEFT JOIN dbo.files f ON f.id = m.file_id
-                    WHERE m.id = :id
-                """), {"id": row["id"]}).mappings().first()
-
-            msg = _row_to_message_dict(row2)
-            out = json.dumps({"type": "message", "data": msg}, default=str)
-
-            
-            dead = []
-            for c in list(active_connections):
-                try:
-                    await c.send_text(out)
-                except Exception:
-                    dead.append(c)
-
-            for d in dead:
-                active_connections.discard(d)
-
-    except WebSocketDisconnect:
-        active_connections.discard(ws)
-    except Exception:
-        active_connections.discard(ws)
-        try:
-            await ws.close()
-        except Exception:
-            pass
+    return dict(row)

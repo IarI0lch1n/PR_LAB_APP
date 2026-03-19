@@ -4,7 +4,7 @@ from urllib.parse import quote_plus
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 
-load_dotenv()  # читает services/chat_api/.env
+load_dotenv()
 
 def make_engine():
     host = os.getenv("DB_HOST", "host.docker.internal")
@@ -22,8 +22,9 @@ def make_engine():
         f"Encrypt=no;"
         f"TrustServerCertificate=yes;"
     )
-
-    conn_str = quote_plus(odbc)
-    return create_engine(f"mssql+pyodbc:///?odbc_connect={conn_str}", pool_pre_ping=True)
+    return create_engine(
+        f"mssql+pyodbc:///?odbc_connect={quote_plus(odbc)}",
+        pool_pre_ping=True
+    )
 
 engine = make_engine()
