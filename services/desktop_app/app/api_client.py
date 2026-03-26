@@ -12,11 +12,13 @@ class ApiClient:
         chat_api_url: str,
         file_api_url: str,
         account_api_url: str,
+        todo_api_url: str,
         timeout: float = 20.0,
     ):
         self.chat_api_url = chat_api_url.rstrip("/")
         self.file_api_url = file_api_url.rstrip("/")
         self.account_api_url = account_api_url.rstrip("/")
+        self.todo_api_url = todo_api_url.rstrip("/")
         self._client = httpx.Client(timeout=timeout)
         self.employee_key: Optional[str] = None
 
@@ -244,6 +246,53 @@ class ApiClient:
     def regenerate_employee_key(self, employee_id: int) -> dict:
         r = self._client.post(
             f"{self.account_api_url}/employees/{int(employee_id)}/regenerate-key",
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
+
+    def list_todo(self) -> list[dict]:
+        r = self._client.get(
+            f"{self.todo_api_url}/todo",
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json().get("items", [])
+
+    def create_todo(
+        self,
+        title: str,
+        deadline: str,
+        employee_ids: list[int],
+        description: str | None = None,
+    ) -> dict:
+        params = {
+            "title": title,
+            "deadline": deadline,
+            "employee_ids": ",".join(str(x) for x in employee_ids),
+        }
+        if description:
+            params["description"] = description
+
+        r = self._client.post(
+            f"{self.todo_api_url}/todo",
+            params=params,
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
+
+    def complete_todo(self, assignment_id: int, completion_note: str | None = None) -> dict:
+        params = {}
+        if completion_note:
+            params["completion_note"] = completion_note
+
+        r = self._client.put(
+            f"{self.todo_api_url}/todo/{int(assignment_id)}/complete",
+            params=params,
             headers=self._auth_headers(),
         )
         if r.status_code >= 400:

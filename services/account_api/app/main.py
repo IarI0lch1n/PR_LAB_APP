@@ -86,6 +86,107 @@ def _send_account_email(
 
     print(f"[EMAIL SENT] from={SMTP_FROM} to={to_email}")
 
+def _send_todo_email(
+    to_email: str,
+    full_name: str,
+    title: str,
+    description: str | None,
+    deadline: str,
+    sender_name: str,
+) -> None:
+    if not to_email:
+        raise RuntimeError("Recipient email is empty")
+
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS and SMTP_FROM):
+        raise RuntimeError("SMTP is not configured in account_api .env")
+
+    subject = "New PR Messenger task list"
+    body = f"""Hello, {full_name}.
+
+You have received a new task list in PR Messenger.
+
+Title:
+{title}
+
+Description:
+{description or "-"}
+
+Deadline:
+{deadline}
+
+Sent by:
+{sender_name}
+
+Please check the ToDo tab in PR Messenger.
+"""
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    msg["Reply-To"] = SMTP_FROM
+
+    context = ssl.create_default_context()
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(SMTP_FROM, [to_email], msg.as_string())
+
+    print(f"[TODO EMAIL SENT] from={SMTP_FROM} to={to_email}")
+
+def _send_todo_completed_email(
+    to_email: str,
+    recipient_name: str,
+    employee_name: str,
+    title: str,
+    deadline: str,
+    note: str | None,
+) -> None:
+    if not to_email:
+        raise RuntimeError("Recipient email is empty")
+
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS and SMTP_FROM):
+        raise RuntimeError("SMTP is not configured in account_api .env")
+
+    subject = "Task completed in PR Messenger"
+    body = f"""Hello, {recipient_name}.
+
+The following task was marked as completed:
+
+Employee:
+{employee_name}
+
+Title:
+{title}
+
+Deadline:
+{deadline}
+
+Completion note:
+{note or "-"}
+
+Please check PR Messenger for details.
+"""
+
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM
+    msg["To"] = to_email
+    msg["Reply-To"] = SMTP_FROM
+
+    context = ssl.create_default_context()
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(SMTP_FROM, [to_email], msg.as_string())
+
+    print(f"[TODO COMPLETED EMAIL SENT] from={SMTP_FROM} to={to_email}")
 
 def _get_user_by_key(x_employee_key: str | None):
     if not x_employee_key:
@@ -380,3 +481,28 @@ def regenerate_key(
         "email_status": email_status,
         "email_error": email_error,
     }
+
+@app.post("/internal/send-todo-email")
+def send_todo_email_internal(
+    to_email: str,
+    full_name: str,
+    title: str,
+    deadline: str,
+    sender_name: str,
+    description: str | None = None,
+):
+    _send_todo_email(to_email, full_name, title, description, deadline, sender_name)
+    return {"status": "sent"}
+
+
+@app.post("/internal/send-todo-completed-email")
+def send_todo_completed_email_internal(
+    to_email: str,
+    recipient_name: str,
+    employee_name: str,
+    title: str,
+    deadline: str,
+    note: str | None = None,
+):
+    _send_todo_completed_email(to_email, recipient_name, employee_name, title, deadline, note)
+    return {"status": "sent"}

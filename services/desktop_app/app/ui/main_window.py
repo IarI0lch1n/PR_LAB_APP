@@ -10,6 +10,7 @@ from app.ui.chats_window import ChatsWindow
 from app.ui.files_page import FilesPage
 from app.ui.publics_page import PublicsPage
 from app.ui.hr_page import HRPage
+from app.ui.todo_page import ToDoPage
 
 
 class MainWindow(QMainWindow):
@@ -36,8 +37,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(ChatsWindow(api), "Chat")
         self.tabs.addTab(PublicsPage(), "Publics")
         self.tabs.addTab(FilesPage(api), "Files")
+        self.tabs.addTab(ToDoPage(api), "ToDo")
 
-        # HR visible only for admin/hr
         try:
             me = self.api.me()
             role = str(me.get("role") or "employee").lower()
@@ -49,14 +50,8 @@ class MainWindow(QMainWindow):
         self._apply_theme()
 
     def on_toggle_theme(self):
-        if hasattr(self.theme_manager, "toggle"):
-            self.theme_manager.toggle()
-        elif hasattr(self.theme_manager, "is_dark"):
-            self.theme_manager.is_dark = not self.theme_manager.is_dark
+        self.theme_manager.toggle()
         self._apply_theme()
 
     def _apply_theme(self):
-        try:
-            self.theme_manager.apply(self.qt_app)
-        except TypeError:
-            self.theme_manager.apply()
+        self.theme_manager.apply(self.qt_app)

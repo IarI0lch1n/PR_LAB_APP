@@ -4,8 +4,8 @@ from PySide6.QtWidgets import QApplication, QDialog
 from app.config import get_config
 from app.api_client import ApiClient
 from app.theme import ThemeManager, LightThemeFactory, DarkThemeFactory
-from app.ui.login_dialog import LoginDialog
 from app.ui.main_window import MainWindow
+from app.ui.login_dialog import LoginDialog
 
 
 def main() -> int:
@@ -15,16 +15,16 @@ def main() -> int:
         chat_api_url=cfg.chat_api_url,
         file_api_url=cfg.file_api_url,
         account_api_url=cfg.account_api_url,
+        todo_api_url=cfg.todo_api_url,
     )
 
     app = QApplication(sys.argv)
 
     theme_manager = ThemeManager(
-        light=LightThemeFactory(),
-        dark=DarkThemeFactory(),
-        current=LightThemeFactory()
+        app,
+        LightThemeFactory(),
+        DarkThemeFactory(),
     )
-    theme_manager.apply(app)
 
     dlg = LoginDialog(api)
     if dlg.exec() != QDialog.DialogCode.Accepted:
