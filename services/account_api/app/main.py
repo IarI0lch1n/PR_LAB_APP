@@ -52,26 +52,28 @@ def _send_account_email(
     if not (SMTP_HOST and SMTP_USER and SMTP_PASS and SMTP_FROM):
         raise RuntimeError("SMTP is not configured in account_api .env")
 
-    subject = "Your PR Messenger account has been created"
-    body = f"""Hello, {full_name}.
+    subject = "PR Messenger account created"
+    body = f"""
+    Hello, {full_name}.
 
-Your PR Messenger account has been created.
+    Your PR Messenger account has been created.
 
-Your employee key:
-{employee_key}
+    Employee key:
+    {employee_key}
 
-Do not share this key with anyone.
+    Please do not share this key with anyone.
 
-Office country: {office_country}
-Position: {position}
+    Office country: {office_country}
+    Position: {position}
 
-If you did not expect this message, contact HR or your administrator.
-"""
+    If you did not expect this message, please contact your administrator.
 
+    """
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = SMTP_FROM
     msg["To"] = to_email
+    msg["Reply-To"] = SMTP_FROM
 
     context = ssl.create_default_context()
 
