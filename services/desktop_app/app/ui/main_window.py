@@ -9,6 +9,7 @@ from app.theme import ThemeManager
 from app.ui.chats_window import ChatsWindow
 from app.ui.files_page import FilesPage
 from app.ui.publics_page import PublicsPage
+from app.ui.hr_page import HRPage
 
 
 class MainWindow(QMainWindow):
@@ -19,7 +20,7 @@ class MainWindow(QMainWindow):
         self.qt_app = qt_app
 
         self.setWindowTitle("PR Messenger")
-        self.resize(1000, 700)
+        self.resize(1100, 760)
 
         tb = QToolBar("Main")
         self.addToolBar(tb)
@@ -35,6 +36,15 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(ChatsWindow(api), "Chat")
         self.tabs.addTab(PublicsPage(), "Publics")
         self.tabs.addTab(FilesPage(api), "Files")
+
+        # HR visible only for admin/hr
+        try:
+            me = self.api.me()
+            role = str(me.get("role") or "employee").lower()
+            if role in ("admin", "hr"):
+                self.tabs.addTab(HRPage(api), "HR")
+        except Exception:
+            pass
 
         self._apply_theme()
 

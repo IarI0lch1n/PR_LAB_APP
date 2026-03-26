@@ -132,6 +132,123 @@ class ApiClient:
             raise RuntimeError(_extract_error(r))
         return r.json()
 
+    def update_file(
+        self,
+        file_id: int,
+        file_path: str | None = None,
+        is_public_download: int | None = None,
+    ) -> dict:
+        files = None
+        data = {}
+
+        f = None
+        if file_path is not None:
+            p = Path(file_path)
+            if not p.exists() or not p.is_file():
+                raise FileNotFoundError(f"File not found: {file_path}")
+            f = p.open("rb")
+            files = {"file": (p.name, f, "application/octet-stream")}
+
+        if is_public_download is not None:
+            data["is_public_download"] = str(int(is_public_download))
+
+        try:
+            r = self._client.put(
+                f"{self.file_api_url}/files/{int(file_id)}",
+                files=files,
+                data=data,
+                headers=self._auth_headers(),
+            )
+        finally:
+            if f is not None:
+                f.close()
+
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
+
+    def list_employees(self) -> list[dict]:
+        r = self._client.get(
+            f"{self.account_api_url}/employees",
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json().get("items", [])
+
+    def create_employee(
+        self,
+        full_name: str,
+        office_country: str,
+        position: str,
+        email: str | None = None,
+        phone: str | None = None,
+        role: str = "employee",
+    ) -> dict:
+        params = {
+            "full_name": full_name,
+            "office_country": office_country,
+            "position": position,
+            "role": role,
+        }
+        if email:
+            params["email"] = email
+        if phone:
+            params["phone"] = phone
+
+        r = self._client.post(
+            f"{self.account_api_url}/employees",
+            params=params,
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
+
+    def update_employee(
+        self,
+        employee_id: int,
+        full_name: str | None = None,
+        office_country: str | None = None,
+        position: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+        is_active: int | None = None,
+        role: str | None = None,
+    ) -> dict:
+        params = {}
+        if full_name is not None:
+            params["full_name"] = full_name
+        if office_country is not None:
+            params["office_country"] = office_country
+        if position is not None:
+            params["position"] = position
+        if email is not None:
+            params["email"] = email
+        if phone is not None:
+            params["phone"] = phone
+        if is_active is not None:
+            params["is_active"] = str(int(is_active))
+        if role is not None:
+            params["role"] = role
+
+        r = self._client.put(
+            f"{self.account_api_url}/employees/{int(employee_id)}",
+            params=params,
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
+
+    def regenerate_employee_key(self, employee_id: int) -> dict:
+        r = self._client.post(
+            f"{self.account_api_url}/employees/{int(employee_id)}/regenerate-key",
+            headers=self._auth_headers(),
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(_extract_error(r))
+        return r.json()
 
 def _extract_error(r: httpx.Response) -> str:
     try:
