@@ -25,8 +25,11 @@ class ApiClient:
     def close(self) -> None:
         self._client.close()
 
-    def set_employee_key(self, key: str) -> None:
+    def set_employee_key(self, key: str | None) -> None:
         self.employee_key = key
+
+    def logout(self) -> None:
+        self.employee_key = None
 
     def _auth_headers(self) -> Dict[str, str]:
         if not self.employee_key:

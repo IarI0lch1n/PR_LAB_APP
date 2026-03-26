@@ -26,13 +26,25 @@ def main() -> int:
         DarkThemeFactory(),
     )
 
-    dlg = LoginDialog(api)
-    if dlg.exec() != QDialog.DialogCode.Accepted:
-        return 0
+    while True:
+        dlg = LoginDialog(api)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            api.close()
+            return 0
 
-    win = MainWindow(api, theme_manager, app)
-    win.show()
-    return app.exec()
+        win = MainWindow(api, theme_manager, app)
+        win.logout_requested.connect(app.quit)
+        win.show()
+
+        app.exec()
+
+        if api.employee_key is None:
+            continue
+
+        break
+
+    api.close()
+    return 0
 
 
 if __name__ == "__main__":

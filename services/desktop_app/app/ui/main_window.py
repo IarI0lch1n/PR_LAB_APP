@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMainWindow, QTabWidget, QToolBar
+from PySide6.QtWidgets import (
+    QMainWindow, QTabWidget, QToolBar, QLabel, QWidget, QSizePolicy,
+    QMessageBox
+)
 
 from app.api_client import ApiClient
 from app.theme import ThemeManager
@@ -14,6 +18,8 @@ from app.ui.todo_page import ToDoPage
 
 
 class MainWindow(QMainWindow):
+    logout_requested = Signal()
+
     def __init__(self, api: ApiClient, theme_manager: ThemeManager, qt_app):
         super().__init__()
         self.api = api
@@ -31,6 +37,19 @@ class MainWindow(QMainWindow):
         self.theme_action.triggered.connect(self.on_toggle_theme)
         tb.addAction(self.theme_action)
 
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        tb.addWidget(spacer)
+
+        self.user_label = QLabel("User: -")
+        self.user_label.setStyleSheet("padding: 0 10px;")
+        tb.addWidget(self.user_label)
+
+        self.logout_action = QAction("Logout", self)
+        self.logout_action.setToolTip("Logout from current account")
+        self.logout_action.triggered.connect(self.on_logout)
+        tb.addAction(self.logout_action)
+
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
@@ -39,15 +58,22 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(FilesPage(api), "Files")
         self.tabs.addTab(ToDoPage(api), "ToDo")
 
+        self._load_me_and_hr_tab()
+        self._apply_theme()
+
+    def _load_me_and_hr_tab(self):
         try:
             me = self.api.me()
-            role = str(me.get("role") or "employee").lower()
-            if role in ("admin", "hr"):
-                self.tabs.addTab(HRPage(api), "HR")
-        except Exception:
-            pass
+            full_name = me.get("full_name") or "Unknown"
+            role = me.get("role") or "employee"
+            email = me.get("email") or "-"
+            self.user_label.setText(f"{full_name} | {role} | {email}")
 
-        self._apply_theme()
+            role_l = str(role).lower()
+            if role_l in ("admin", "hr"):
+                self.tabs.addTab(HRPage(self.api), "HR")
+        except Exception:
+            self.user_label.setText("User: unknown")
 
     def on_toggle_theme(self):
         self.theme_manager.toggle()
@@ -55,3 +81,18 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self):
         self.theme_manager.apply(self.qt_app)
+
+    def on_logout(self):
+        reply = QMessageBox.question(
+            self,
+            "Logout",
+            "Do you want to logout from current account?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.api.logout()
+        self.logout_requested.emit()
+        self.close()
